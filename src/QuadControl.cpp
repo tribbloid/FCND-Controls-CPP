@@ -15,23 +15,31 @@
 
 using matrix::SquareMatrix;
 
-SquareMatrix<float, 4> getInvMixing()
+SquareMatrix<float, 4> QuadControl::getInvMixing()
 {
+  auto coll = matrix::Vector<double, 4>((double[]){1,1,1,1});
+  auto roll = matrix::Vector<double, 4>((double[]){1,-1,1,-1}) * this->L;
+  auto pitch = matrix::Vector<double, 4>((double[]){1,1,-1,-1}) * this->L;
+  auto yaw = matrix::Vector<double, 4>((double[]){-1,1,1,-1}) * this->kappa;
 
-  float mixingArray[4][4] = {
-      {1,1,1,1},
-      {1,-1,-1,1},
-      {1,1,-1,-1},
-      {1,-1,1,-1}
-  };
-
-  auto mixing = SquareMatrix<float, 4>(*mixingArray);
+  auto mixing = SquareMatrix<double, 4>();
+  mixing.setRow(0, coll);
+  mixing.setRow(1, roll);
+  mixing.setRow(2, pitch);
+  mixing.setRow(3, yaw);
 
   auto invMixing = mixing.I();
-  return invMixing;
-}
 
-const auto demixing = getInvMixing(); //TODO: how to fix?
+  auto final = SquareMatrix<float, 4>();
+
+  for (int i=0; i<4; i++) {
+    for (int j=0; j<4; j++) {
+      final._data[i][j] = (float) invMixing._data[i][j];
+    }
+  }
+
+  return final;
+}
 
 void QuadControl::Init()
 {
@@ -73,6 +81,11 @@ void QuadControl::Init()
   param_get(param_find("MC_PITCH_P"), &Kp_bank);
   param_get(param_find("MC_YAW_P"), &Kp_yaw);
 #endif
+
+  demixing = getInvMixing();
+
+  maxMotorAcc = maxMotorThrust*4.f / mass;
+  maxMotorAccSq = maxMotorAcc * maxMotorAcc;
 }
 
 VehicleCommand QuadControl::GenerateMotorCommands(float collThrustCmd, V3F momentCmd)
@@ -93,14 +106,14 @@ VehicleCommand QuadControl::GenerateMotorCommands(float collThrustCmd, V3F momen
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
   // just left-multiply by invMixing
-  float proto[] = {collThrustCmd * mass, momentCmd.x, momentCmd.y, momentCmd.z};
+  float proto[] = {collThrustCmd, momentCmd.x, momentCmd.y, momentCmd.z};
   auto demixed = demixing * matrix::Vector<float, 4>(proto);
-  auto &data = *(demixed._data);
+  auto data = (demixed.data());
 
-  cmd.desiredThrustsN[0] = data[0];
-  cmd.desiredThrustsN[1] = data[1];
-  cmd.desiredThrustsN[2] = data[2];
-  cmd.desiredThrustsN[3] = data[3];
+  cmd.desiredThrustsN[0] = CONSTRAIN(data[0], minMotorThrust, maxMotorThrust);
+  cmd.desiredThrustsN[1] = CONSTRAIN(data[1], minMotorThrust, maxMotorThrust);
+  cmd.desiredThrustsN[2] = CONSTRAIN(data[2], minMotorThrust, maxMotorThrust);
+  cmd.desiredThrustsN[3] = CONSTRAIN(data[3], minMotorThrust, maxMotorThrust);
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
@@ -132,19 +145,21 @@ V3F QuadControl::BodyRateControl(V3F pqrCmd, V3F pqr)
   auto proportions = errors * kpPQR;
 
   auto Ivec = V3F(Ixx, Iyy, Izz);
-  //TODO: use euler equation?
-  momentCmd = proportions * Ivec;
+
+  auto momentBase = proportions * Ivec;
+  auto momentEulerCorrection = pqr.cross(pqr* Ivec);
+  momentCmd = momentBase;
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   return momentCmd;
 }
 
-Quaternion<> getRotationQuaternion(V3F v1, V3F v2)
+Quaternion<float> getRotationQuaternion(V3F v1, V3F v2)
 {
   auto cross = v1.cross(v2);
   auto residual = std::sqrt(v1.magSq() * v2.magSq()) + v1.dot(v2);
-  auto quat = Quaternion<>(residual, cross.x, cross.y, cross.z).Normalise();
+  auto quat = Quaternion<float>(residual, cross.x, cross.y, cross.z).Normalise();
   return quat;
 }
 
@@ -174,14 +189,14 @@ V3F QuadControl::RollPitchControl(V3F accelCmd, Quaternion<float> attitude, floa
 
   auto R33 = R[8];
 
-  auto thrust_a = collThrustCmd / mass;
+  auto thrust_a = - collThrustCmd / mass;
   auto thrust_a_z = thrust_a * R33;
 
-  auto a_cmd = V3F(accelCmd[0], accelCmd[1], - thrust_a_z);
-  auto a_cmd_optimized = getOptimalAccelCmd(a_cmd);
+  auto a_cmd = V3F(accelCmd[0], accelCmd[1], thrust_a_z);
+  auto a_cmd_optimized = optimizeAccCmd(a_cmd);
 
   auto a_cmd_body = attitude.Rotate_ItoB(a_cmd_optimized);
-  auto a_current_body = V3F(0, 0, - thrust_a);
+  auto a_current_body = V3F(0, 0, thrust_a);
 
   auto d_q = getRotationQuaternion(a_current_body, a_cmd_body);
 
@@ -193,17 +208,16 @@ V3F QuadControl::RollPitchControl(V3F accelCmd, Quaternion<float> attitude, floa
   return pqrCmd;
 }
 
-V3F QuadControl::getOptimalAccelCmd(V3F cmd)
+V3F QuadControl::optimizeAccCmd(V3F cmd)
 {
   auto result = cmd;
-  if (result.z <= 0) //avoid flipping
-    result.z = 0;
+  if (result.z >= -0.1) //avoid flipping
+    result.z = -0.1f;
 
-  auto a_cmd_L2Sq = result.mag();
-  auto maxMotorAcc = maxMotorThrust / mass;
-  if (a_cmd_L2Sq > maxMotorAcc) {
+  auto a_cmd_L2Sq = result.magSq();
+  if (a_cmd_L2Sq > maxMotorAccSq) {
 
-    auto max_xyL2Sq = maxMotorAcc - result.z * result.z;
+    auto max_xyL2Sq = maxMotorAccSq - result.z * result.z;
     if (max_xyL2Sq < 0) {
       result = {0, 0, - maxMotorAcc};
     }
@@ -242,8 +256,29 @@ float QuadControl::AltitudeControl(float posZCmd, float velZCmd, float posZ, flo
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  auto error_z = posZCmd - posZ;
+  auto error_dot_z = velZCmd - velZ;
+  integratedAltitudeError += error_z;
 
+  auto p = kpPosZ * kpVelZ;
+  auto d = kpVelZ;
+  auto i = KiPosZ;
 
+  auto acc_z = p*error_z + i*integratedAltitudeError + d*error_dot_z + accelZCmd;
+  auto acc_up_withGravity = - acc_z + (float) CONST_GRAVITY;
+
+  auto R33 = R[8];
+  auto acc_thrust = 0.f;
+  if (R33 <=0) {
+    acc_thrust = maxMotorAcc;
+  }
+  else {
+    // counter-projection
+    acc_thrust = CONSTRAIN(acc_up_withGravity / R33, 0, maxMotorAcc);
+  }
+  thrust = acc_thrust * mass;
+
+//  thrust = (float) (mass * CONST_GRAVITY);
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   return thrust;
@@ -280,7 +315,13 @@ V3F QuadControl::LateralPositionControl(V3F posCmd, V3F velCmd, V3F pos, V3F vel
 
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  auto error_xy = posCmd - pos;
+  auto error_dxy = velCmd - vel;
 
+  auto p = kpPosXY * kpVelXY;
+  auto d = kpVelXY;
+
+  accelCmd += p*error_xy + d*error_dxy;
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
@@ -303,6 +344,8 @@ float QuadControl::YawControl(float yawCmd, float yaw)
   float yawRateCmd=0;
   ////////////////////////////// BEGIN STUDENT CODE ///////////////////////////
 
+  auto error = yawCmd - yaw;
+  yawRateCmd = kpYaw * error;
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 

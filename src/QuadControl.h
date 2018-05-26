@@ -1,6 +1,7 @@
 #pragma once
 
 
+#include <matrix/math.hpp>
 #include "Utility/StringUtils.h"
 #include "Trajectory.h"
 #include "BaseController.h"
@@ -49,5 +50,11 @@ public:
   // integral control
   float integratedAltitudeError;
 
-  V3F getOptimalAccelCmd(V3F cmd);
+  float maxMotorAcc;
+  float maxMotorAccSq;
+
+  V3F optimizeAccCmd(V3F cmd);
+
+  matrix::SquareMatrix<float, 4> demixing;
+  matrix::SquareMatrix<float, 4> getInvMixing();
 };
