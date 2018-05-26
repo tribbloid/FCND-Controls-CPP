@@ -50,8 +50,9 @@ public:
   // integral control
   float integratedAltitudeError;
 
-  float maxMotorAcc;
-  float maxMotorAccSq;
+  float neverExceedAcc;
+  float maxSafeAcc;
+  float maxSafeAccSq;
 
   V3F optimizeAccCmd(V3F cmd);
 

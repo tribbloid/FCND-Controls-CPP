@@ -8,6 +8,8 @@
 #include "BaseController.h"
 #include "Math/Mat3x3F.h"
 #include <matrix/math.hpp>
+#include <iostream>
+#include <cfloat>
 
 #ifdef __PX4_NUTTX
 #include <systemlib/param/param.h>
@@ -84,8 +86,10 @@ void QuadControl::Init()
 
   demixing = getInvMixing();
 
-  maxMotorAcc = maxMotorThrust*4.f / mass;
-  maxMotorAccSq = maxMotorAcc * maxMotorAcc;
+  neverExceedAcc = maxMotorThrust*4.f / mass;
+  // CAUTION: must be smaller than neverExceedAcc: when all thrusters are close to limit you lose maneuverability
+  maxSafeAcc = maxMotorThrust*2.f / mass;
+  maxSafeAccSq = maxSafeAcc * maxSafeAcc;
 }
 
 VehicleCommand QuadControl::GenerateMotorCommands(float collThrustCmd, V3F momentCmd)
@@ -144,11 +148,16 @@ V3F QuadControl::BodyRateControl(V3F pqrCmd, V3F pqr)
   auto errors = pqrCmd - pqr;
   auto proportions = errors * kpPQR;
 
-  auto Ivec = V3F(Ixx, Iyy, Izz);
+  auto IMat = Mat3x3F::Zeros();
+  IMat[0] = Ixx;
+  IMat[4] = Iyy;
+  IMat[8] = Izz;
 
-  auto momentBase = proportions * Ivec;
-  auto momentEulerCorrection = pqr.cross(pqr* Ivec);
-  momentCmd = momentBase;
+//  auto Ivec = V3F(Ixx, Iyy, Izz);
+
+  auto momentBase = IMat * proportions;
+  auto momentEulerCorrection = pqr.cross(IMat * pqr);
+  momentCmd = momentBase + momentEulerCorrection;
 
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
@@ -189,14 +198,14 @@ V3F QuadControl::RollPitchControl(V3F accelCmd, Quaternion<float> attitude, floa
 
   auto R33 = R[8];
 
-  auto thrust_a = - collThrustCmd / mass;
-  auto thrust_a_z = thrust_a * R33;
+  auto accThrust = - collThrustCmd / mass;
+  auto accThrust_z = accThrust * R33;
 
-  auto a_cmd = V3F(accelCmd[0], accelCmd[1], thrust_a_z);
+  auto a_cmd = V3F(accelCmd[0], accelCmd[1], accThrust_z);
   auto a_cmd_optimized = optimizeAccCmd(a_cmd);
 
   auto a_cmd_body = attitude.Rotate_ItoB(a_cmd_optimized);
-  auto a_current_body = V3F(0, 0, thrust_a);
+  auto a_current_body = V3F(0, 0, accThrust);
 
   auto d_q = getRotationQuaternion(a_current_body, a_cmd_body);
 
@@ -211,15 +220,18 @@ V3F QuadControl::RollPitchControl(V3F accelCmd, Quaternion<float> attitude, floa
 V3F QuadControl::optimizeAccCmd(V3F cmd)
 {
   auto result = cmd;
-  if (result.z >= -0.1) //avoid flipping
-    result.z = -0.1f;
+  if (result.z >= -FLT_MIN){
+    //avoid flipping
+//    cout << "flipping!\n";
+    result.z = -FLT_MIN;
+  }
 
   auto a_cmd_L2Sq = result.magSq();
-  if (a_cmd_L2Sq > maxMotorAccSq) {
+  if (a_cmd_L2Sq > maxSafeAccSq) {
 
-    auto max_xyL2Sq = maxMotorAccSq - result.z * result.z;
+    auto max_xyL2Sq = maxSafeAccSq - result.z * result.z;
     if (max_xyL2Sq < 0) {
-      result = {0, 0, - maxMotorAcc};
+      result = {0, 0, - maxSafeAcc};
     }
     else {
       auto xyL2Sq = result.x * result.x + result.y * result.y;
@@ -265,20 +277,19 @@ float QuadControl::AltitudeControl(float posZCmd, float velZCmd, float posZ, flo
   auto i = KiPosZ;
 
   auto acc_z = p*error_z + i*integratedAltitudeError + d*error_dot_z + accelZCmd;
-  auto acc_up_withGravity = - acc_z + (float) CONST_GRAVITY;
+  auto acc_z_withG = acc_z - (float) CONST_GRAVITY;
 
   auto R33 = R[8];
-  auto acc_thrust = 0.f;
+  float acc_thrust;
   if (R33 <=0) {
-    acc_thrust = maxMotorAcc;
+    acc_thrust = neverExceedAcc;
   }
   else {
     // counter-projection
-    acc_thrust = CONSTRAIN(acc_up_withGravity / R33, 0, maxMotorAcc);
+    acc_thrust = CONSTRAIN(- acc_z_withG / R33, 0, neverExceedAcc);
   }
   thrust = acc_thrust * mass;
 
-//  thrust = (float) (mass * CONST_GRAVITY);
   /////////////////////////////// END STUDENT CODE ////////////////////////////
 
   return thrust;
