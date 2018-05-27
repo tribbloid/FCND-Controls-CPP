@@ -86,10 +86,10 @@ void QuadControl::Init()
 
   demixing = getInvMixing();
 
-  neverExceedAcc = maxMotorThrust*4.f / mass;
-  // CAUTION: must be smaller than neverExceedAcc: when all thrusters are close to limit you lose maneuverability
-  maxSafeAcc = maxMotorThrust*2.f / mass;
-  maxSafeAccSq = maxSafeAcc * maxSafeAcc;
+  maxAcc = maxMotorThrust*4.f / mass;
+//  // CAUTION: must be smaller than maxAcc: when all thrusters are close to limit you lose maneuverability
+//  maxSafeAcc = maxMotorThrust*2.f / mass;
+//  maxSafeAccSq = maxSafeAcc * maxSafeAcc;
 }
 
 VehicleCommand QuadControl::GenerateMotorCommands(float collThrustCmd, V3F momentCmd)
@@ -217,29 +217,40 @@ V3F QuadControl::RollPitchControl(V3F accelCmd, Quaternion<float> attitude, floa
   return pqrCmd;
 }
 
+//yield a more feasible banking angle
 V3F QuadControl::optimizeAccCmd(V3F cmd)
 {
   auto result = cmd;
-  if (result.z >= -FLT_MIN){
-    //avoid flipping
-//    cout << "flipping!\n";
-    result.z = -FLT_MIN;
+
+  auto maxTiltSin = sin(maxTiltAngle);
+  auto length = cmd.mag();
+
+  auto maxZ = - std::max(length * maxTiltSin, -0.00001f); //z is down
+  if (cmd.z >= maxZ) {
+    result.z = maxZ;
   }
 
-  auto a_cmd_L2Sq = result.magSq();
-  if (a_cmd_L2Sq > maxSafeAccSq) {
+//  if (result.z >= -FLT_MIN){
+//    //avoid flipping
+////    cout << "flipping!\n";
+//    result.z = -FLT_MIN;
+//  }
+//
+//  auto a_cmd_L2Sq = result.magSq();
+//  if (a_cmd_L2Sq > maxSafeAccSq) {
+//
+//    auto max_xyL2Sq = maxSafeAccSq - result.z * result.z;
+//    if (max_xyL2Sq < 0) {
+//      result = {0, 0, - maxSafeAcc};
+//    }
+//    else {
+//      auto xyL2Sq = result.x * result.x + result.y * result.y;
+//      auto ratio = std::sqrt(max_xyL2Sq / xyL2Sq);
+//      result.x = result.x * ratio;
+//      result.y = result.y * ratio;
+//    }
+//  }
 
-    auto max_xyL2Sq = maxSafeAccSq - result.z * result.z;
-    if (max_xyL2Sq < 0) {
-      result = {0, 0, - maxSafeAcc};
-    }
-    else {
-      auto xyL2Sq = result.x * result.x + result.y * result.y;
-      auto ratio = std::sqrt(max_xyL2Sq / xyL2Sq);
-      result.x = result.x * ratio;
-      result.y = result.y * ratio;
-    }
-  }
   return result;
 }
 
@@ -270,7 +281,7 @@ float QuadControl::AltitudeControl(float posZCmd, float velZCmd, float posZ, flo
 
   auto error_z = posZCmd - posZ;
   auto error_dot_z = velZCmd - velZ;
-  integratedAltitudeError += error_z;
+  integratedAltitudeError += error_z *dt;
 
   auto p = kpPosZ * kpVelZ;
   auto d = kpVelZ;
@@ -282,11 +293,12 @@ float QuadControl::AltitudeControl(float posZCmd, float velZCmd, float posZ, flo
   auto R33 = R[8];
   float acc_thrust;
   if (R33 <=0) {
-    acc_thrust = neverExceedAcc;
+    cout << "flipped!\n";
+    acc_thrust = maxAcc;
   }
   else {
     // counter-projection
-    acc_thrust = CONSTRAIN(- acc_z_withG / R33, 0, neverExceedAcc);
+    acc_thrust = CONSTRAIN(- acc_z_withG / R33, 0, maxAcc);
   }
   thrust = acc_thrust * mass;
 
