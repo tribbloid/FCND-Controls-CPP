@@ -13,8 +13,8 @@
 
 #define ONBOARD_TS 0.002 // Controller update dt in [s]. TODO AS PARAM!
 
-QuadDynamics::QuadDynamics(string name) 
- : BaseDynamics(name)
+QuadDynamics::QuadDynamics(string name)
+    : BaseDynamics(name)
 {
   Initialize();
 }
@@ -32,11 +32,11 @@ void QuadDynamics::ResetState(V3F pos, V3F vel, Quaternion<float> att, V3F omega
   controllerUpdateInterval = (double)ONBOARD_TS;
   timeSinceLastControllerUpdate = controllerUpdateInterval; // Force the simulation to start with a controller update
 
-	xyzDisturbance = rotDisturbance = V3D();
+  xyzDisturbance = rotDisturbance = V3D();
 }
 
 void QuadDynamics::SetPosVelAttOmega(V3F pos, V3F vel, Quaternion<float> att, V3F omega)
-{ 
+{
   BaseDynamics::ResetState(pos,vel,att,omega);
 }
 
@@ -45,14 +45,14 @@ int QuadDynamics::Initialize()
   if(!BaseDynamics::Initialize()) return 0;
 
   _initialized = false;
-	
+
   _vehicleType = VEHICLE_TYPE_QUAD;
 
   _lastTrajPointTime = 0;
   _trajLogStepTime = 0;
 
   ParamsHandle config = SimpleConfig::GetInstance();
-	
+
   // PARAMETERS
   M = config->Get(_name+".Mass", .5f);
   L = config->Get(_name + ".L", 0.17f); // dist from center to thrust
@@ -110,9 +110,9 @@ int QuadDynamics::Initialize()
 
   V3F ypr = config->Get(_name + ".InitialYPR", V3F());
   ResetState(config->Get(_name + ".InitialPos", V3F(0, 0, 1)),
-    config->Get(_name + ".InitialVel", V3F()),
-    Quaternion<float>::FromEulerYPR(ypr.x, ypr.y, ypr.z),
-    config->Get(_name + ".InitialOmega", V3F()));
+             config->Get(_name + ".InitialVel", V3F()),
+             Quaternion<float>::FromEulerYPR(ypr.x, ypr.y, ypr.z),
+             config->Get(_name + ".InitialOmega", V3F()));
 
   _initialized = true;
 
@@ -128,10 +128,10 @@ int QuadDynamics::Initialize()
 
 void QuadDynamics::Run(float dt, float simulationTime, int &idum, V3F externalForceInGlobalFrame, V3F externalMomentInBodyFrame)
 {
-	if (dt <= 0 || dt>0.05 || _isnan(dt))
-	{
-		printf("Something is wrong with dt: %lf", dt);
-	}
+  if (dt <= 0 || dt>0.05 || _isnan(dt))
+  {
+    printf("Something is wrong with dt: %lf", dt);
+  }
   double remainingTimeToSimulate = dt;
 
   while(remainingTimeToSimulate > 0.000001) // Time intervals lower than that are just discarded (for speed of running)
@@ -139,37 +139,37 @@ void QuadDynamics::Run(float dt, float simulationTime, int &idum, V3F externalFo
     if(timeSinceLastControllerUpdate >= controllerUpdateInterval)
     {
       // generate virtual gyro and accelerometer data
-			V3F newRawGyro = V3F(omega+sqrtf(gyroNoiseInt/dt)*V3F(gasdev(idum),gasdev(idum),gasdev(idum)));
-			const float c = expf(-dt/0.004f); // the real gyro filter has 250Hz bandwidth
-			_rawGyro = (1.f-c)*newRawGyro + c*_rawGyro;
+      V3F newRawGyro = V3F(omega+sqrtf(gyroNoiseInt/dt)*V3F(gasdev(idum),gasdev(idum),gasdev(idum)));
+      const float c = expf(-dt/0.004f); // the real gyro filter has 250Hz bandwidth
+      _rawGyro = (1.f-c)*newRawGyro + c*_rawGyro;
 
-			// ... accelerometer (no noise currently)
-      
+      // ... accelerometer (no noise currently)
+
       V3F bodyAcc = quat.Rotate_ItoB(V3F(acc));
-			V3F rawAccel = V3F( bodyAcc);
-			rawAccel.constrain(-6.f*9.81f,6.f*9.81f);
+      V3F rawAccel = V3F( bodyAcc);
+      rawAccel.constrain(-6.f*9.81f,6.f*9.81f);
 
 
       // TODO: run callbacks to update sensors
-			// push this into the HAL to the simulated onboard controller
-			//_onboard.SetIMU_AG(rawAccel,_rawGyro);
+      // push this into the HAL to the simulated onboard controller
+      //_onboard.SetIMU_AG(rawAccel,_rawGyro);
 
       //_onboard.SetRangeSensor(pos.z);
       //V3F vel_body = quat.Rotate_ItoB(vel);
       //_onboard.SetOpticalFlow(vel.x,vel.y); // todo - optical flow also sees rotation, and there's a scale thing here..
 
-			// This is the update of the onboard controller -- runs timeout logic, sensor filtering, estimation, 
-			// controller, and produces a new set of motor commands
-			//_onboard.RunEstimation();
-			if (updateIdealStateCallback) 
-			{
-				updateIdealStateCallback(Position(), Velocity(), quat, Omega());
-			}
-			if (controller)
-			{
+      // This is the update of the onboard controller -- runs timeout logic, sensor filtering, estimation,
+      // controller, and produces a new set of motor commands
+      //_onboard.RunEstimation();
+      if (updateIdealStateCallback)
+      {
+        updateIdealStateCallback(Position(), Velocity(), quat, Omega());
+      }
+      if (controller)
+      {
         curCmd = controller->RunControl(controllerUpdateInterval, simulationTime);
         _lastPosFollowErr = controller->curTrajPoint.position.dist(Position());
-			}
+      }
 
       if (simulationTime < 0.0000001){
         motorCmdsOld(0) = curCmd.desiredThrustsN[0];
@@ -200,7 +200,7 @@ void QuadDynamics::Dynamics(float dt, float simTime, V3F external_force, V3F ext
   // constrain the desired thrusts to reflect real-world constraints
   for (int i = 0; i < 4; i++)
   {
-		curCmd.desiredThrustsN[i] = CONSTRAIN(curCmd.desiredThrustsN[i], minMotorThrust, maxMotorThrust);
+    curCmd.desiredThrustsN[i] = CONSTRAIN(curCmd.desiredThrustsN[i], minMotorThrust, maxMotorThrust);
     motorCmdsN(i) = curCmd.desiredThrustsN[i] + randomMotorForceMag * ran1_inRange(-1.f, 1.f, idum);
   }
 
@@ -210,7 +210,7 @@ void QuadDynamics::Dynamics(float dt, float simTime, V3F external_force, V3F ext
     {
       motorCmdsN(m) = motorCmdsN(m) * ((float)dt/((float)dt + (float)tauaUp)) + motorCmdsOld(m) * ((float)tauaUp/((float)dt + (float)tauaUp));
     }
-    else 
+    else
     {
       motorCmdsN(m) = motorCmdsN(m) * ((float)dt/((float)dt + (float)tauaDown)) + motorCmdsOld(m) * ((float)tauaDown/((float)dt + (float)tauaDown));
     }
@@ -326,7 +326,7 @@ void QuadDynamics::Dynamics(float dt, float simTime, V3F external_force, V3F ext
       followedTrajectoryCallback(traj_pt);
     }
 
-    
+
   }
 }
 
@@ -365,26 +365,26 @@ void QuadDynamics::RunRoomConstraints(const V3F& oldPos)
 
 void QuadDynamics::SetCommands(const VehicleCommand& cmd)
 {
-	curCmd = cmd;
+  curCmd = cmd;
 }
 
 
 void QuadDynamics::TurnOffNonidealities()
 {
-	// This function turns off all nonidealities in the simulator.
+  // This function turns off all nonidealities in the simulator.
 
-	//Set noise terms to zero.
-	gyroNoiseInt = 0; //gyroNoiseInt
-	rotDisturbanceInt = 0; //rotDistInt
-	xyzDisturbanceInt = 0; //xyzDistInt
-	rotDisturbanceBW = 0; //rotDistBW
-	xyzDisturbanceBW = 0; //xyzDistBW
+  //Set noise terms to zero.
+  gyroNoiseInt = 0; //gyroNoiseInt
+  rotDisturbanceInt = 0; //rotDistInt
+  xyzDisturbanceInt = 0; //xyzDistInt
+  rotDisturbanceBW = 0; //rotDistBW
+  xyzDisturbanceBW = 0; //xyzDistBW
 
-	//Meters error in CMToSpine
-	//Reload cx and cy because there has been added an error to them,
-	//see initialized in QuadDynamics::Initialize
-    cx = 0;
-    cy = 0;
+  //Meters error in CMToSpine
+  //Reload cx and cy because there has been added an error to them,
+  //see initialized in QuadDynamics::Initialize
+  cx = 0;
+  cy = 0;
 }
 
 bool QuadDynamics::GetData(const string& name, float& ret) const
@@ -410,7 +410,7 @@ bool QuadDynamics::GetData(const string& name, float& ret) const
     return controller->GetData(name, ret);
   }
 
-  return false;  
+  return false;
 }
 
 vector<string> QuadDynamics::GetFields() const
@@ -421,7 +421,7 @@ vector<string> QuadDynamics::GetFields() const
   ret.push_back(_name + ".Thrust.C");
   ret.push_back(_name + ".Thrust.D");
   ret.push_back(_name + ".PosFollowErr");
-  
+
   if (controller)
   {
     vector<string> controllerFields = controller->GetFields();

@@ -23,6 +23,8 @@ bld/
 # CLion/IntelliJ IDEA
 .idea/
 
+# QT
+*.pro.user
 
 # manual cmake build ignores
 build/

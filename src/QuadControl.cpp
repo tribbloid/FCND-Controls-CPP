@@ -19,10 +19,10 @@ using matrix::SquareMatrix;
 
 SquareMatrix<float, 4> QuadControl::getInvMixing()
 {
-  auto coll = matrix::Vector<double, 4>((double[]){1,1,1,1});
-  auto roll = matrix::Vector<double, 4>((double[]){1,-1,1,-1}) * this->L;
-  auto pitch = matrix::Vector<double, 4>((double[]){1,1,-1,-1}) * this->L;
-  auto yaw = matrix::Vector<double, 4>((double[]){-1,1,1,-1}) * this->kappa;
+  auto coll = matrix::Vector<double, 4>(std::vector<double>({1,1,1,1}).data());
+  auto roll = matrix::Vector<double, 4>(std::vector<double>({1,-1,1,-1}).data()) * this->L;
+  auto pitch = matrix::Vector<double, 4>(std::vector<double>({1,1,-1,-1}).data()) * this->L;
+  auto yaw = matrix::Vector<double, 4>(std::vector<double>({-1,1,1,-1}).data()) * this->kappa;
 
   auto mixing = SquareMatrix<double, 4>();
   mixing.setRow(0, coll);
@@ -164,6 +164,8 @@ V3F QuadControl::BodyRateControl(V3F pqrCmd, V3F pqr)
   return momentCmd;
 }
 
+// source:
+// https://stackoverflow.com/questions/1171849/finding-quaternion-representing-the-rotation-from-one-vector-to-another
 Quaternion<float> getRotationQuaternion(V3F v1, V3F v2)
 {
   auto cross = v1.cross(v2);
